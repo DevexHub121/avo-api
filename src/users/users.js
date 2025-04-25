@@ -13,7 +13,22 @@ const query = util.promisify(db.query).bind(db);
 
 const SignUp = async (req, res) => {
   try {
-    const { name, email, password, number, address, profile_photo } = req.body;
+    const {
+      name,
+      email,
+      password,
+      number,
+      address,
+      profile_photo,
+      is_businessadmin,
+      business_name,
+      business_address,
+      business_city,
+      business_state,
+      business_country,
+      business_pincode,
+      logo,
+    } = req.body;
 
     // ✅ Check required fields
     if (!name || !email || !password) {
@@ -31,52 +46,117 @@ const SignUp = async (req, res) => {
       });
     }
 
-    // ✅ Check if user already exists
+    // ✅ Check if user exists
     const existingUser = await query(
-      "SELECT id, is_verified FROM users WHERE email = ?",
+      "SELECT id, is_verified, role, business_id FROM users WHERE email = ?",
       [email]
     );
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Generate OTP
     const otp = generateOTP();
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     if (existingUser.length > 0) {
       const user = existingUser[0];
 
       if (!user.is_verified) {
-        // ✅ User exists but not verified - Update details & Resend OTP
-        await query(
-          `UPDATE users SET 
-            name = ?, 
-            password = ?, 
-            number = ?, 
-            address = ?, 
-            profile_photo = ?, 
-            otp = ? 
-          WHERE email = ?`,
-          [
-            name,
-            hashedPassword,
-            number || null,
-            address || "Not Provided",
-            profile_photo || null,
-            otp,
-            email,
-          ]
-        );
+        // User exists but not verified
+        if (user.role === "business_admin" && !is_businessadmin) {
+          // Case where business admin wants to become a user
+          await query(
+            "UPDATE users SET name = ?, password = ?, number = ?, address = ?, profile_photo = ?, otp = ?, role = ?, business_id = NULL WHERE email = ?",
+            [
+              name,
+              hashedPassword,
+              number || null,
+              address || "Not Provided",
+              profile_photo || null,
+              otp,
+              "user",
+              email,
+            ]
+          );
 
-        await sendOTP(email, otp);
+          // Optionally, delete business details if role is changed
+          await query("DELETE FROM businesses WHERE owner_id = ?", [user.id]);
 
-        return res.json({
-          status: 20, // 202 Accepted
-          data: {
-            message:
-              "User details updated. OTP resent. Please verify your email.",
-            userId: user.id,
-          },
-        });
+          // Send OTP for verification
+          await sendOTP(email, otp);
+
+          return res.json({
+            status: 200,
+            data: {
+              message:
+                "Your account has been updated to a user role. OTP has been resent for verification.",
+            },
+          });
+        }
+
+        if (is_businessadmin) {
+          // Case where user wants to become a business admin
+          let businessResult;
+
+          // Check if business already exists for the user
+          const [existingBusiness] = await query(
+            "SELECT * FROM businesses WHERE owner_id = ?",
+            [user.id]
+          );
+
+          if (existingBusiness) {
+            // If business exists, update it
+            await query(
+              "UPDATE businesses SET name = ?, address = ?, city = ?, state = ?, country = ?, pincode = ?, logo = ? WHERE id = ?",
+              [
+                business_name,
+                business_address,
+                business_city,
+                business_state,
+                business_country,
+                business_pincode,
+                logo,
+                existingBusiness.id,
+              ]
+            );
+            businessResult = existingBusiness; // Use the existing business object
+          } else {
+            // Create new business if it doesn't exist
+            businessResult = await query(
+              "INSERT INTO businesses (name, owner_id, address, city, state, country, pincode, logo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              [
+                business_name,
+                user.id,
+                business_address,
+                business_city,
+                business_state,
+                business_country,
+                business_pincode,
+                logo || null,
+              ]
+            );
+          }
+
+          // Update user role to business admin
+          await query(
+            "UPDATE users SET role = 'business_admin', business_id = ? WHERE id = ?",
+            [
+              businessResult.id, // Access businessResult.id after it's defined
+              user.id,
+            ]
+          );
+
+          // Send OTP for verification
+          await sendOTP(email, otp);
+
+          return res.json({
+            status: 200,
+            data: {
+              message:
+                "Your account has been upgraded to business admin. OTP has been resent for verification.",
+            },
+          });
+        }
       } else {
-        // ✅ User exists and is verified - Show error
+        // User is verified and already registered
         return res.json({
           status: 409,
           data: { message: "Email already exists. Please log in." },
@@ -84,29 +164,50 @@ const SignUp = async (req, res) => {
       }
     }
 
-    // ✅ If user doesn't exist, create a new user
-    await sendOTP(email, otp);
-
+    // If user doesn't exist, create new user
     const insertQuery = `
-      INSERT INTO users (name, email, password, number, address, role, otp, is_verified, auth_token, refresh_token, profile_photo)  
+      INSERT INTO users (name, email, password, number, address, role, otp, is_verified, auth_token, refresh_token, profile_photo)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
-
     const values = [
       name,
       email,
       hashedPassword,
       number || null,
       address || "Not Provided",
-      "user",
+      is_businessadmin ? "business_admin" : "user",
       otp,
       false,
       null,
       null,
       profile_photo || null,
     ];
-
     const result = await query(insertQuery, values);
+
+    if (is_businessadmin) {
+      const businessResult = await query(
+        "INSERT INTO businesses (name, owner_id, address, city, state, country, pincode, logo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+          business_name,
+          result.insertId,
+          business_address,
+          business_city,
+          business_state,
+          business_country,
+          business_pincode,
+          logo || null,
+        ]
+      );
+
+      // Update user with business info
+      await query("UPDATE users SET business_id = ? WHERE id = ?", [
+        businessResult.insertId,
+        result.insertId,
+      ]);
+    }
+
+    // Send OTP for verification
+    await sendOTP(email, otp);
 
     return res.json({
       status: 200,
@@ -242,20 +343,33 @@ const SignIn = async (req, res) => {
       user[0].id,
     ]);
 
+    // Prepare response
+    const responseData = {
+      id: user[0].id,
+      name: user[0].name,
+      email: user[0].email,
+      number: user[0].number,
+      address: user[0].address,
+      profile_photo: user[0].profile_photo,
+      role: user[0].role,
+      auth_token: authToken,
+    };
+
+    // If the user is a business admin, fetch business data as well
+    if (user[0].role === "business_admin" && user[0].business_id) {
+      const business = await query("SELECT * FROM businesses WHERE id = ?", [
+        user[0].business_id,
+      ]);
+      if (business.length > 0) {
+        responseData.business = business[0];
+      }
+    }
+
     return res.json({
       status: 200,
       data: {
         message: "Sign in successful.",
-        user: {
-          id: user[0].id,
-          name: user[0].name,
-          email: user[0].email,
-          number: user[0].number,
-          address: user[0].address,
-          profile_photo: user[0].profile_photo,
-          role: user[0].role,
-          auth_token: authToken,
-        },
+        user: responseData,
       },
     });
   } catch (error) {

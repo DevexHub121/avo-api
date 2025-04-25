@@ -127,6 +127,96 @@ const RegisterOrUpdateBusiness = async (req, res) => {
   }
 };
 
+const UpdateBusiness = async (req, res) => {
+  const {
+    business_name,
+    business_address,
+    city,
+    state,
+    country,
+    pincode,
+    logo,
+  } = req.body;
+  const user_id = req.user.id; // Logged-in user ID
+  const user_role = req.user.role; // Logged-in user role
+
+  // Check if the user is a business admin
+  if (user_role !== "business_admin") {
+    return res.json({
+      status: 403,
+      data: {
+        message:
+          "Unauthorized: Only business admins can update business details.",
+      },
+    });
+  }
+
+  try {
+    // ✅ Get the business_id associated with the user
+    const [user] = await query("SELECT business_id FROM users WHERE id = ?", [
+      user_id,
+    ]);
+
+    // If the user is not associated with a business
+    if (!user || !user.business_id) {
+      return res.json({
+        status: 404,
+        data: { message: "Business not found for this user." },
+      });
+    }
+
+    const business_id = user.business_id;
+
+    // ✅ Get the existing business data
+    const [business] = await query("SELECT * FROM businesses WHERE id = ?", [
+      business_id,
+    ]);
+
+    // If the business does not exist
+    if (!business) {
+      return res.json({
+        status: 404,
+        data: { message: "Business not found." },
+      });
+    }
+
+    // ✅ Update business details
+    await query(
+      "UPDATE businesses SET name = ?, address = ?, city = ?, state = ?, country = ?, pincode = ?, logo = ? WHERE id = ?",
+      [
+        business_name || business.name,
+        business_address || business.address,
+        city || business.city,
+        state || business.state,
+        country || business.country,
+        pincode || business.pincode,
+        logo || business.logo,
+        business_id,
+      ]
+    );
+
+    // Fetch updated business details
+    const [updatedBusiness] = await query(
+      "SELECT * FROM businesses WHERE id = ?",
+      [business_id]
+    );
+
+    return res.json({
+      status: 200,
+      data: {
+        message: "Business updated successfully.",
+        business: updatedBusiness, // Return updated business details
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error:", error);
+    return res.json({
+      status: 500,
+      data: { message: "Internal Server Error", error: error.message },
+    });
+  }
+};
+
 const GetBusinessByUserId = async (req, res) => {
   try {
     const user_id = req.user.id; // Logged-in user ID
@@ -653,4 +743,5 @@ module.exports = {
   GetBusinessByUserId,
   GetUserByIdReq,
   getCouponUsageForBusinessAdmin,
+  UpdateBusiness,
 };

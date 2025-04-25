@@ -22,6 +22,7 @@ const {
   GetBusinessByUserId,
   GetUserByIdReq,
   getCouponUsageForBusinessAdmin,
+  UpdateBusiness,
 } = require("../business/business");
 const { authenticate, isBusinessAdmin } = require("../Authentication/auth");
 const {
@@ -94,7 +95,8 @@ router.get(
 );
 
 // Register business and manage employee
-router.post("/register-business", authenticate, RegisterOrUpdateBusiness);
+// router.post("/register-business", authenticate, RegisterOrUpdateBusiness);
+router.post("/update-business", authenticate, UpdateBusiness);
 router.get("/employee-list", authenticate, GetEmployeesByBusiness);
 router.post("/add-employee", authenticate, AddEmployee);
 router.put("/update-employee", authenticate, UpdateEmployee);
