@@ -2,6 +2,8 @@ const db = require("../DB/db");
 const util = require("util");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const axios = require("axios");
+
 require("dotenv").config();
 const {
   isValidEmail,
@@ -542,6 +544,230 @@ const UpdateUserProfile = async (req, res) => {
   }
 };
 
+const googleSignIn = async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ message: "Token missing" });
+  }
+
+  try {
+    // Fetch user info from Google
+    const { data: googleData } = await axios.get(
+      "https://www.googleapis.com/oauth2/v2/userinfo",
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+
+    const { email, verified_email } = googleData;
+
+    if (!verified_email) {
+      return res.status(400).json({ message: "Email not verified" });
+    }
+
+    // Check if user exists in DB
+    const [user] = await query("SELECT * FROM users WHERE email = ?", [email]);
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    if (!user.is_verified) {
+      return res.status(403).json({
+        message: "Account not verified. Please verify your email.",
+      });
+    }
+
+    // Generate JWT token
+    const authToken = jwt.sign(
+      { id: user.id, role: user.role },
+      process.env.SECRET_KEY,
+      { expiresIn: "1d" }
+    );
+
+    // Save token
+    await query("UPDATE users SET auth_token = ? WHERE id = ?", [
+      authToken,
+      user.id,
+    ]);
+
+    const userData = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      number: user.number,
+      address: user.address,
+      profile_photo: user.profile_photo,
+      role: user.role,
+      auth_token: authToken,
+    };
+
+    // Attach business info if applicable
+    if (user.role === "business_admin" && user.business_id) {
+      const [business] = await query("SELECT * FROM businesses WHERE id = ?", [
+        user.business_id,
+      ]);
+      if (business) userData.business = business;
+    }
+
+    return res.status(200).json({
+      message: "Sign in successful.",
+      user: userData,
+    });
+  } catch (error) {
+    console.error("Google SignIn Error:", error.message);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+const googleRegister = async (req, res) => {
+  try {
+    const {
+      name,
+      token,
+      number,
+      address,
+      profile_photo,
+      is_businessadmin,
+      business_name,
+      business_address,
+      business_city,
+      business_state,
+      business_country,
+      business_pincode,
+      logo,
+    } = req.body;
+
+    if (!name || !token) {
+      return res.status(400).json({
+        message: "Name and token are required.",
+      });
+    }
+
+    // ✅ Get email from Google
+    const googleRes = await axios.get(
+      "https://www.googleapis.com/oauth2/v2/userinfo",
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    const { email, verified_email } = googleRes.data;
+    if (!verified_email) {
+      return res.status(400).json({ message: "Google email not verified." });
+    }
+
+    // ✅ Check if user exists
+    const existingUsers = await query(
+      "SELECT id, is_verified, role, business_id FROM users WHERE email = ?",
+      [email]
+    );
+
+    if (existingUsers.length > 0) {
+      return res.status(409).json({
+        message: "Email already exists. Please log in.",
+      });
+    }
+
+    // ✅ Insert new user
+    const role = is_businessadmin ? "business_admin" : "user";
+    const insertUserQuery = `
+      INSERT INTO users 
+      (name, email, password, number, address, role, otp, is_verified, auth_token, refresh_token, profile_photo) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    const userValues = [
+      name,
+      email,
+      "GOOGLE_AUTH_USER",
+      number || "0000000000",
+      address || "Signed up with Google",
+      role,
+      null, // otp
+      true, // is_verified
+      null, // auth_token (will update later)
+      null, // refresh_token
+      profile_photo || null,
+    ];
+    const userResult = await query(insertUserQuery, userValues);
+
+    let business = null;
+
+    if (is_businessadmin) {
+      // ✅ Create business and link to user
+      const businessInsert = await query(
+        `INSERT INTO businesses 
+         (name, owner_id, address, city, state, country, pincode, logo) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          business_name,
+          userResult.insertId,
+          business_address,
+          business_city,
+          business_state,
+          business_country,
+          business_pincode,
+          logo || null,
+        ]
+      );
+
+      // ✅ Update user with business_id
+      await query("UPDATE users SET business_id = ? WHERE id = ?", [
+        businessInsert.insertId,
+        userResult.insertId,
+      ]);
+
+      // Get business data for response
+      [business] = await query("SELECT * FROM businesses WHERE id = ?", [
+        businessInsert.insertId,
+      ]);
+    }
+
+    // ✅ Get created user
+    const [user] = await query("SELECT * FROM users WHERE id = ?", [
+      userResult.insertId,
+    ]);
+
+    // ✅ Generate and save token
+    const authToken = jwt.sign(
+      { id: user.id, role: user.role },
+      process.env.SECRET_KEY,
+      { expiresIn: "1d" }
+    );
+    await query("UPDATE users SET auth_token = ? WHERE id = ?", [
+      authToken,
+      user.id,
+    ]);
+
+    // ✅ Response
+    const userData = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      number: user.number,
+      address: user.address,
+      profile_photo: user.profile_photo,
+      role: user.role,
+      auth_token: authToken,
+      ...(business && { business }), // attach business if present
+    };
+
+    return res.status(200).json({
+      message: "Sign in successful.",
+      user: userData,
+    });
+  } catch (error) {
+    console.error("❌ Error:", error.message);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   SignUp,
   ResendOTP,
@@ -550,4 +776,6 @@ module.exports = {
   ForgotPasswordLink,
   ResetPasswordLink,
   UpdateUserProfile,
+  googleRegister,
+  googleSignIn,
 };

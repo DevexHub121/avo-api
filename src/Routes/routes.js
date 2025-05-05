@@ -1,141 +1,68 @@
 const express = require("express");
 const multer = require("multer");
-const {
-  SignUp,
-  ResendOTP,
-  VerifyOTP,
-  ForgotPassword,
-  VerifyForgotPasswordOTP,
-  ResetPassword,
-  SignIn,
-  ForgotPasswordLink,
-  ResetPasswordLink,
-  UpdateUserProfile,
-} = require("../users/users");
-const {
-  AddEmployee,
-  DeleteEmployee,
-  UpdateEmployee,
-  RegisterOrUpdateBusiness,
-  GetEmployeesByBusiness,
-  GetUserById,
-  GetBusinessByUserId,
-  GetUserByIdReq,
-  getCouponUsageForBusinessAdmin,
-  UpdateBusiness,
-} = require("../business/business");
-const { authenticate, isBusinessAdmin } = require("../Authentication/auth");
-const {
-  createOrUpdateOffer,
-  deleteOffer,
-  publishUnpublishOffer,
-  publishedOfferList,
-  businessOfferList,
-} = require("../offers/offers");
+
+const user = require("../users/users");
+const business = require("../business/business");
+const offer = require("../offers/offers");
+const coupon = require("../coupon/coupon");
+const transaction = require("../transaction/transaction");
+const auth = require("../Authentication/auth");
 const uploadImageCloudinary = require("../Cloundinary/imageUpload");
-const {
-  createTransaction,
-  getTransaction,
-  UpdateTransaction,
-} = require("../transaction/transaction");
-const {
-  RedeemCoupon,
-  UseCoupon,
-  GetRedeemedCouponsWithUsage,
-  GetCouponUsageDetails,
-  GetBusinessEmployeesWithCoupons,
-  getValidCouponsForUser,
-} = require("../coupon/coupon");
+
 const router = express.Router();
 
+// Multer setup
 const storage = multer.diskStorage({});
+const upload = multer({ storage, limits: { fileSize: 1024 * 1024 * 10 } });
 
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: 1024 * 1024 * 10,
-  },
-});
+/* =======================User Authentication======================= */
+router.post("/signup", user.SignUp);
+router.post("/signin", user.SignIn);
+router.post("/resend-otp", user.ResendOTP);
+router.post("/verify-otp", user.VerifyOTP);
+router.post("/forgot-password", user.ForgotPasswordLink);
+router.post("/reset-password", user.ResetPasswordLink);
+router.put("/update-profile", auth.authenticate, user.UpdateUserProfile);
 
-// User Apis
-router.post("/SignUp", SignUp);
-router.post("/resend-otp", ResendOTP);
-router.post("/verify-otp", VerifyOTP);
-router.post("/signin", SignIn);
-router.post("/forgot-password", ForgotPasswordLink);
-router.post("/reset-password", ResetPasswordLink);
-router.put("/update-profile", authenticate, UpdateUserProfile);
+/* =======================Google OAuth======================= */
+router.post("/google_register", user.googleRegister);
+router.post("/google_signin", user.googleSignIn);
 
-//get user details
-router.get("/user-details", authenticate, GetUserById);
-router.get("/user-details-byId", authenticate, isBusinessAdmin, GetUserByIdReq);
-router.get(
-  "/valid-coupons",
-  authenticate,
-  isBusinessAdmin,
-  getValidCouponsForUser
-);
-router.get(
-  "/coupon-usage-business",
-  authenticate,
-  isBusinessAdmin,
-  getCouponUsageForBusinessAdmin
-);
-router.get(
-  "/business-details",
-  authenticate,
-  isBusinessAdmin,
-  GetBusinessByUserId
-);
-router.get(
-  "/employee-history",
-  authenticate,
-  isBusinessAdmin,
-  GetBusinessEmployeesWithCoupons
-);
+/* =======================User Data======================= */
+router.get("/user-details", auth.authenticate, user.GetUserById);
+router.get("/user-details-byId", auth.authenticate, auth.isBusinessAdmin, user.GetUserByIdReq);
 
-// Register business and manage employee
-// router.post("/register-business", authenticate, RegisterOrUpdateBusiness);
-router.post("/update-business", authenticate, UpdateBusiness);
-router.get("/employee-list", authenticate, GetEmployeesByBusiness);
-router.post("/add-employee", authenticate, AddEmployee);
-router.put("/update-employee", authenticate, UpdateEmployee);
-router.delete("/delete-employees", authenticate, DeleteEmployee);
+/* =======================Business & Employee======================= */
+router.post("/update-business", auth.authenticate, business.UpdateBusiness);
+router.get("/business-details", auth.authenticate, auth.isBusinessAdmin, business.GetBusinessByUserId);
 
-// Offers
-router.post(
-  "/create-offer",
-  authenticate,
-  isBusinessAdmin,
-  createOrUpdateOffer
-);
-router.delete("/delete-offer", authenticate, isBusinessAdmin, deleteOffer);
-router.post(
-  "/publish-offer",
-  authenticate,
-  isBusinessAdmin,
-  publishUnpublishOffer
-);
-router.get("/publish-offer-list", authenticate, publishedOfferList);
-router.get(
-  "/business-offer-list",
-  authenticate,
-  isBusinessAdmin,
-  businessOfferList
-);
+router.post("/add-employee", auth.authenticate, business.AddEmployee);
+router.put("/update-employee", auth.authenticate, business.UpdateEmployee);
+router.delete("/delete-employees", auth.authenticate, business.DeleteEmployee);
+router.get("/employee-list", auth.authenticate, business.GetEmployeesByBusiness);
 
-//coupons related apis
-router.post("/redeem-coupon", authenticate, RedeemCoupon);
-router.post("/use-coupon", authenticate, isBusinessAdmin, UseCoupon);
-router.get("/redeemed-coupons", authenticate, GetRedeemedCouponsWithUsage);
-router.get("/coupon-usage", authenticate, GetCouponUsageDetails);
+/* =======================Offers======================= */
+router.post("/create-offer", auth.authenticate, auth.isBusinessAdmin, offer.createOrUpdateOffer);
+router.delete("/delete-offer", auth.authenticate, auth.isBusinessAdmin, offer.deleteOffer);
+router.post("/publish-offer", auth.authenticate, auth.isBusinessAdmin, offer.publishUnpublishOffer);
+router.get("/publish-offer-list", auth.authenticate, offer.publishedOfferList);
+router.get("/business-offer-list", auth.authenticate, auth.isBusinessAdmin, offer.businessOfferList);
 
-//transactions
-router.post("/transactions", authenticate, createTransaction);
-router.get("/transactions_Details", authenticate, getTransaction);
-router.put("/update_transactions", authenticate, UpdateTransaction);
+/* =======================Coupons======================= */
+router.post("/redeem-coupon", auth.authenticate, coupon.RedeemCoupon);
+router.post("/use-coupon", auth.authenticate, auth.isBusinessAdmin, coupon.UseCoupon);
+router.get("/redeemed-coupons", auth.authenticate, coupon.GetRedeemedCouponsWithUsage);
+router.get("/coupon-usage", auth.authenticate, coupon.GetCouponUsageDetails);
+router.get("/valid-coupons", auth.authenticate, auth.isBusinessAdmin, coupon.getValidCouponsForUser);
+router.get("/coupon-usage-business", auth.authenticate, auth.isBusinessAdmin, coupon.getCouponUsageForBusinessAdmin);
+router.get("/employee-history", auth.authenticate, auth.isBusinessAdmin, coupon.GetBusinessEmployeesWithCoupons);
 
-//image upload
+/* =======================Transactions======================= */
+router.post("/transactions", auth.authenticate, transaction.createTransaction);
+router.get("/transactions_details", auth.authenticate, transaction.getTransaction);
+router.put("/update_transactions", auth.authenticate, transaction.UpdateTransaction);
+
+/* =======================Image Upload======================= */
 router.post("/upload-image", upload.single("image"), uploadImageCloudinary);
 
 module.exports = router;
