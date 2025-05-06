@@ -548,7 +548,7 @@ const googleSignIn = async (req, res) => {
   const { token } = req.body;
 
   if (!token) {
-    return res.status(400).json({ message: "Token missing" });
+    return res.json({ status: 400, message: "Token missing" });
   }
 
   try {
@@ -563,18 +563,19 @@ const googleSignIn = async (req, res) => {
     const { email, verified_email } = googleData;
 
     if (!verified_email) {
-      return res.status(400).json({ message: "Email not verified by google" });
+      return res.json({ status: 400, message: "Email not verified by google" });
     }
 
     // Check if user exists in DB
     const [user] = await query("SELECT * FROM users WHERE email = ?", [email]);
 
     if (!user) {
-      return res.status(404).json({ message: "User not found." });
+      return res.json({ status: 404, message: "User not found." });
     }
 
     if (!user.is_verified) {
-      return res.status(403).json({
+      return res.json({
+        status: 403,
         message: "Account not verified. Please verify your email.",
       });
     }
@@ -611,13 +612,14 @@ const googleSignIn = async (req, res) => {
       if (business) userData.business = business;
     }
 
-    return res.status(200).json({
+    return res.json({
+      status: 200,
       message: "Sign in successful.",
       user: userData,
     });
   } catch (error) {
     console.error("Google SignIn Error:", error.message);
-    return res.status(500).json({ message: "Internal server error" });
+    return res.json({ status: 500, message: "Internal server error" });
   }
 };
 
@@ -640,7 +642,8 @@ const googleRegister = async (req, res) => {
     } = req.body;
 
     if (!name || !token) {
-      return res.status(400).json({
+      return res.json({
+        status: 400,
         message: "Name and token are required.",
       });
     }
@@ -657,7 +660,7 @@ const googleRegister = async (req, res) => {
 
     const { email, verified_email } = googleRes.data;
     if (!verified_email) {
-      return res.status(400).json({ message: "Google email not verified." });
+      return res.json({ status: 400, message: "Google email not verified." });
     }
 
     // ✅ Check if user exists
@@ -667,7 +670,8 @@ const googleRegister = async (req, res) => {
     );
 
     if (existingUsers.length > 0) {
-      return res.status(409).json({
+      return res.json({
+        status: 409,
         message: "Email already exists. Please log in.",
       });
     }
@@ -755,13 +759,15 @@ const googleRegister = async (req, res) => {
       ...(business && { business }), // attach business if present
     };
 
-    return res.status(200).json({
+    return res.json({
+      status: 200,
       message: "Sign in successful.",
       user: userData,
     });
   } catch (error) {
     console.error("❌ Error:", error.message);
-    return res.status(500).json({
+    return res.json({
+      status: 500,
       message: "Internal Server Error",
       error: error.message,
     });
