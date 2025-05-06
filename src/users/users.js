@@ -563,7 +563,7 @@ const googleSignIn = async (req, res) => {
     const { email, verified_email } = googleData;
 
     if (!verified_email) {
-      return res.status(400).json({ message: "Email not verified" });
+      return res.status(400).json({ message: "Email not verified by google" });
     }
 
     // Check if user exists in DB
